@@ -40,6 +40,13 @@
 
 A simple cross-platform C++ library for terminal based user interfaces!
 
+> [!TIP]
+> Check out [RTXUI](https://github.com/ArthurSonzogni/RTXUI), my other
+> project. It is a different, experimental TUI library based on reactive
+> HTML/CSS/C++: structure with semantic HTML, style with real CSS (flexbox,
+> grid, transitions), and bind plain C++ state.
+> [Live demo](https://arthursonzogni.github.io/RTXUI/#interactive-playground).
+
 ## Feature
  * Functional style. Inspired by
    [1](https://hackernoon.com/building-reactive-terminal-interfaces-in-c-d392ce34e649?gi=d9fb9ce35901)
@@ -366,6 +373,7 @@ Feel free to add your projects here:
 - [FTB - tertminal file browser](https://github.com/Cyxuan0311/FTB)
 - [FTowerX](https://github.com/MhmRhm/FTowerX)
 - [Fallout terminal hacking](https://github.com/gshigin/yet-another-fallout-terminal-hacking-game)
+- [Imza - Coding Agent](https://github.com/umutsevdi/imza)
 - [Lazylist](https://github.com/zhuyongqi9/lazylist)
 - [Memory game](https://github.com/mikolajlubiak/memory)
 - [nfolens](https://github.com/a4x7/nfolens)
@@ -389,6 +397,7 @@ Feel free to add your projects here:
 - [i3-termdialogs](https://github.com/mibli/i3-termdialogs)
 - [inLimbo](https://github.com/nots1dd/inLimbo)
 - [keywords](https://github.com/Oakamoore/keywords) ([Play web version :heart:](https://oakamoore.itch.io/keywords))
+- [LookForward Calendar](https://github.com/sin390/look-forward-calendar)
 - [ltuiny](https://github.com/adrianoviana87/ltuiny)
 - [openJuice](https://github.com/mikomikotaishi/openJuice)
 - [ostree-tui](https://github.com/AP-Sensing/ostree-tui)
@@ -411,6 +420,7 @@ Feel free to add your projects here:
 - [Baobab TUI Remake](https://github.com/orrnithogalum/bonsai)
 - [Youtube Music Client](https://github.com/orrnithogalum/moroder)
 - [TUI_DB](https://github.com/klementii229/TUI_DB)
+- [Tpedia - Terminal Wikipedia](https://github.com/Float314/tpedia)
 
 ### [cpp-best-practices/game_jam](https://github.com/cpp-best-practices/game_jam)
 

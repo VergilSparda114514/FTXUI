@@ -209,6 +209,97 @@ class InputBase : public ComponentBase, public InputOption {
     return true;
   }
 
+  bool HandleBackspaceWord() {
+    if (cursor_position() == 0) {
+      return false;
+    }
+
+    size_t start = cursor_position();
+    const size_t previous = GlyphPrevious(content(), start);
+    if (content()[previous] == '\n') {
+      start = previous;
+    } else {
+      // Phase 1: Skip non-word characters going backward (stopping at '\n').
+      while (start > 0) {
+        const size_t prev = GlyphPrevious(content(), start);
+        if (content()[prev] == '\n' || IsWordCharacter(content(), prev)) {
+          break;
+        }
+        start = prev;
+      }
+
+      // Phase 2: Skip word characters going backward (stopping at '\n').
+      while (start > 0) {
+        const size_t prev = GlyphPrevious(content(), start);
+        if (content()[prev] == '\n' || !IsWordCharacter(content(), prev)) {
+          break;
+        }
+        start = prev;
+      }
+    }
+
+    const size_t end = cursor_position();
+    content->erase(start, end - start);
+    cursor_position() = static_cast<int>(start);
+    App::PostEventOrExecute(on_change);
+    return true;
+  }
+
+  bool HandleDeleteWord() {
+    if (cursor_position() == (int)content->size()) {
+      return false;
+    }
+
+    size_t end = cursor_position();
+    if (content()[end] == '\n') {
+      end++;
+    } else {
+      // Phase 1: Skip non-word characters going forward (stopping at '\n').
+      while (end < content->size() && content()[end] != '\n' &&
+             !IsWordCharacter(content(), end)) {
+        end = GlyphNext(content(), end);
+      }
+
+      // Phase 2: Skip word characters going forward (stopping at '\n').
+      while (end < content->size() && content()[end] != '\n' &&
+             IsWordCharacter(content(), end)) {
+        end = GlyphNext(content(), end);
+      }
+    }
+
+    const size_t start = cursor_position();
+    content->erase(start, end - start);
+    App::PostEventOrExecute(on_change);
+    return true;
+  }
+
+  // Delete from the beginning of the line to the cursor.
+  bool HandleBackspaceLine() {
+    if (cursor_position() == 0) {
+      return false;
+    }
+
+    size_t start = cursor_position();
+    const size_t previous = GlyphPrevious(content(), start);
+    if (content()[previous] == '\n') {
+      start = previous;
+    } else {
+      while (start > 0) {
+        const size_t prev = GlyphPrevious(content(), start);
+        if (content()[prev] == '\n') {
+          break;
+        }
+        start = prev;
+      }
+    }
+
+    const size_t end = cursor_position();
+    content->erase(start, end - start);
+    cursor_position() = static_cast<int>(start);
+    App::PostEventOrExecute(on_change);
+    return true;
+  }
+
   bool DeleteImpl() {
     if (cursor_position() == (int)content->size()) {
       return false;
@@ -355,6 +446,26 @@ class InputBase : public ComponentBase, public InputOption {
     return true;
   }
 
+  bool HandleLineStart() {
+    while (cursor_position() > 0) {
+      const size_t previous = GlyphPrevious(content(), cursor_position());
+      if (content()[previous] == '\n') {
+        break;
+      }
+      cursor_position() = static_cast<int>(previous);
+    }
+    return true;
+  }
+
+  bool HandleLineEnd() {
+    while (cursor_position() < (int)content->size() &&
+           content()[cursor_position()] != '\n') {
+      cursor_position() =
+          static_cast<int>(GlyphNext(content(), cursor_position()));
+    }
+    return true;
+  }
+
   bool HandleReturn() {
     if (multiline()) {
       HandleCharacter("\n");
@@ -389,8 +500,19 @@ class InputBase : public ComponentBase, public InputOption {
     if (event == Event::Backspace) {
       return HandleBackspace();
     }
+    if (event == Event::BackspaceAlt || event == Event::AltBackspace ||
+        event == Event::CtrlW) {
+      return HandleBackspaceWord();
+    }
+    if (event == Event::CtrlU) {
+      return HandleBackspaceLine();
+    }
     if (event == Event::Delete) {
       return HandleDelete();
+    }
+    if (event == Event::DeleteAlt || event == Event::DeleteCtrl ||
+        event == Event::AltD) {
+      return HandleDeleteWord();
     }
     if (event == Event::ArrowLeft) {
       return HandleArrowLeft();
@@ -410,11 +532,25 @@ class InputBase : public ComponentBase, public InputOption {
     if (event == Event::End) {
       return HandleEnd();
     }
-    if (event == Event::ArrowLeftCtrl) {
+    if (event == Event::CtrlA) {
+      return HandleLineStart();
+    }
+    if (event == Event::CtrlE) {
+      return HandleLineEnd();
+    }
+    if (event == Event::ArrowLeftCtrl || event == Event::ArrowLeftAlt ||
+        event == Event::AltB) {
       return HandleLeftCtrl();
     }
-    if (event == Event::ArrowRightCtrl) {
+    if (event == Event::ArrowRightCtrl || event == Event::ArrowRightAlt ||
+        event == Event::AltF) {
       return HandleRightCtrl();
+    }
+    if (event == Event::ArrowUpAlt) {
+      return HandleArrowUp();
+    }
+    if (event == Event::ArrowDownAlt) {
+      return HandleArrowDown();
     }
     if (event == Event::Insert) {
       return HandleInsert();

@@ -5,6 +5,24 @@ Next
 ====
 
 ### Component
+- Bugfix: Calling `Loop` several times on the same `App` drew the new frame
+  over the previous one, leaving parts of it on screen. The new frame is now
+  drawn below. A nested app that exits, or is suspended, before drawing
+  anything no longer erases the lines above it. See #809.
+- Feature: Each frame is wrapped in a synchronized update (DEC mode 2026), so
+  that the terminal presents it at once instead of while it is being drawn.
+  This avoids tearing, notably over high-latency connections. Terminals not
+  supporting it ignore it. See #1304.
+- Feature: Support Alt+Arrow keys (word navigation for Left/Right) and
+  Alt+Backspace (delete word backward) in the `Input` component.
+- Feature: Support more editing shortcuts in the `Input` component, matching
+  what macOS terminals send for Cmd and Option keys:
+  - Ctrl+A / Ctrl+E: move to the beginning / end of the line.
+  - Alt+B / Alt+F: move one word left / right.
+  - Ctrl+W: delete the previous word.
+  - Ctrl+U: delete up to the beginning of the line.
+  - Alt+Delete, Ctrl+Delete, Alt+D: delete the next word.
+  Add `Event::DeleteAlt` and `Event::DeleteCtrl`. Thanks @jsphweid. See #1089.
 - Bugfix: Stop escape sequences from eating the ESC byte starting the next one.
   Pressing the ESC key while moving the mouse, or any sequence truncated by the
   terminal, used to be merged with the sequence following it, emitting its
@@ -38,6 +56,9 @@ Next
   @aaron-michaux. See #904.
 
 ### Dom
+- Bugfix: `LinearGradient` stops without an explicit position are now spread
+  in order. With two or more of them in the middle, their colors used to be
+  reversed. Thanks @davidscottpope-gif. See #1379.
 - Bugfix: `vscroll_indicator` and `hscroll_indicator` no longer take the
   foreground color and style of the content scrolled below them. They keep
   the style of their parents, and only the background of the content.
@@ -52,6 +73,12 @@ Next
   content, not the border. Thanks @alex-pat. See #1016.
 
 ### Screen
+- Feature: Only print the cells that changed since the previous frame. This
+  reduces the output a lot, which matters over high-latency connections.
+  `Screen::ToString(std::string&, const Screen& previous)` is added for this.
+  Thanks @mbacarella. See #1304.
+- Bugfix: A fullwidth character drawn over the second half of another one, e.g.
+  using `dbox`, no longer shifts the rest of the line to the left.
 - Bugfix: Emoji with the presentation selector U+FE0F (e.g. ❤️) now take two
   cells, as drawn by modern terminals. They used to shift the rest of the line.
   Thanks @Darleanow. See #929.
@@ -75,6 +102,12 @@ Next
   `flex_grow_factor`, `flex_shrink_factor` and their `x`/`y` variants) and
   `Terminal::TerminalInfo` / `Terminal::ComputeColorSupport` were missing the
   same way and are now exported too. Thanks @woquchonglang. See #1360.
+- Bugfix: Give every source file a unique name. Visual Studio's own build
+  system puts all the object files in one directory, so `dom/color.cpp` and
+  `screen/color.cpp` overwrote each other, causing unresolved `color` and
+  `bgcolor` symbols. Thanks @HDuft. See #896.
+- Add `tools/check.py`, running repository checks in CI: unique source file
+  names, the same sources built by CMake, Meson and Bazel, and license headers.
 - Bugfix: Fix missing CMake targets namespace in exported package when C++20
   modules are enabled. Thanks @patlefort. See #1322.
 

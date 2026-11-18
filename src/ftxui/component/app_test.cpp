@@ -18,7 +18,10 @@
 #include <unistd.h>
 #include <array>
 #include <cstdio>
+#include <functional>  // for function
+#include <iostream>    // for cout, flush
 #include <string>
+#include <vector>  // for vector
 #endif
 
 namespace ftxui {
@@ -254,6 +257,9 @@ TEST(App, FixedSizeInitialFrame) {
   expected += "\x1B[?1006h"s;  // Enable SGR mouse tracking.
   expected += "\0"s;           // Flush stdout.
 
+  // Begin the synchronized update.
+  expected += "\x1B[?2026h"s;
+
   // Reset the screen.
   expected += "\x1B[?25l"s;  // Hide cursor.
 
@@ -263,6 +269,9 @@ TEST(App, FixedSizeInitialFrame) {
 
   // Set cursor position.
   expected += "\x1B[1D"s;  // Move cursor left one character.
+
+  // End the synchronized update.
+  expected += "\x1B[?2026l"s;
 
   // Flush
   expected += "\0"s;  // Flush stdout.
@@ -305,6 +314,239 @@ TEST(App, PrintAbove) {
   ASSERT_NE(xy, std::string::npos);
   EXPECT_EQ(output.find("XY", xy + 1), std::string::npos);
   EXPECT_NE(output.find("AB", xy), std::string::npos);
+#endif
+}
+
+#if defined(__unix__)
+namespace {
+// Draw a frame for each step, and return the output of each.
+std::vector<std::string> DrawFrames(App& screen,
+                                    Component component,
+                                    std::vector<std::function<void()>> steps) {
+  const std::string separator = "<FRAME>";
+  std::string output;
+  {
+    auto capture = StdCapture(&output);
+    Loop loop(&screen, component);
+    for (auto& step : steps) {
+      std::cout << separator << std::flush;
+      step();
+      screen.PostEvent(Event::Custom);
+      loop.RunOnce();
+    }
+    std::cout << separator << std::flush;
+  }
+
+  std::vector<std::string> frames;
+  size_t begin = output.find(separator) + separator.size();
+  size_t end = 0;
+  while ((end = output.find(separator, begin)) != std::string::npos) {
+    frames.push_back(output.substr(begin, end - begin));
+    begin = end + separator.size();
+  }
+  return frames;
+}
+
+Component Lines(int* counter) {
+  return Renderer([counter] {
+    return vbox({
+        text("Header"),
+        text("Counter " + std::to_string(*counter)),
+        text("Footer"),
+    });
+  });
+}
+}  // namespace
+#endif
+
+// Only the cells that changed are printed. See #1304.
+TEST(App, UpdateInPlace) {
+#if defined(__unix__)
+  int counter = 0;
+  auto screen = App::FixedSize(12, 3);
+  auto frames = DrawFrames(screen, Lines(&counter),
+                           {
+                               [] {},
+                               [&] { counter = 1; },
+                               [] {},
+                           });
+  ASSERT_EQ(frames.size(), 3u);
+  EXPECT_NE(frames[0].find("Header"), std::string::npos);
+  EXPECT_NE(frames[0].find("Footer"), std::string::npos);
+
+  // Only the counter changed.
+  EXPECT_EQ(frames[1].find("Header"), std::string::npos);
+  EXPECT_EQ(frames[1].find("Footer"), std::string::npos);
+  EXPECT_EQ(frames[1].find("Counter"), std::string::npos);
+  EXPECT_NE(frames[1].find('1'), std::string::npos);
+
+  // Nothing changed.
+  EXPECT_EQ(frames[2].find("Header"), std::string::npos);
+  EXPECT_EQ(frames[2].find("Footer"), std::string::npos);
+  EXPECT_EQ(frames[2].find("Counter"), std::string::npos);
+#endif
+}
+
+// A resize redraws everything.
+TEST(App, UpdateInPlaceResize) {
+#if defined(__unix__)
+  int counter = 0;
+  auto screen = App::FitComponent();
+  auto frames = DrawFrames(screen, Lines(&counter),
+                           {
+                               [] {},
+                               [&] { counter = 10; },
+                               [&] { counter = 11; },
+                           });
+  ASSERT_EQ(frames.size(), 3u);
+  EXPECT_NE(frames[1].find("Header"), std::string::npos);
+  EXPECT_NE(frames[1].find("Footer"), std::string::npos);
+
+  // The next frame, with the same size, is updated in place.
+  EXPECT_EQ(frames[2].find("Header"), std::string::npos);
+  EXPECT_EQ(frames[2].find("Footer"), std::string::npos);
+  EXPECT_NE(frames[2].find('1'), std::string::npos);
+#endif
+}
+
+// Printing above the frame redraws everything.
+TEST(App, UpdateInPlacePrintAbove) {
+#if defined(__unix__)
+  int counter = 0;
+  auto screen = App::FixedSize(12, 3);
+  auto frames = DrawFrames(screen, Lines(&counter),
+                           {
+                               [] {},
+                               [&] { screen.PrintAbove(text("Above")); },
+                           });
+  ASSERT_EQ(frames.size(), 2u);
+  EXPECT_NE(frames[1].find("Above"), std::string::npos);
+  EXPECT_NE(frames[1].find("Header"), std::string::npos);
+  EXPECT_NE(frames[1].find("Footer"), std::string::npos);
+#endif
+}
+
+// Restoring the terminal for a while redraws everything.
+TEST(App, UpdateInPlaceWithRestoredIO) {
+#if defined(__unix__)
+  int counter = 0;
+  auto screen = App::FixedSize(12, 3);
+  auto frames = DrawFrames(screen, Lines(&counter),
+                           {
+                               [] {},
+                               [&] { screen.WithRestoredIO([] {})(); },
+                           });
+  ASSERT_EQ(frames.size(), 2u);
+  EXPECT_NE(frames[1].find("Header"), std::string::npos);
+  EXPECT_NE(frames[1].find("Footer"), std::string::npos);
+#endif
+}
+
+// A second Loop draws below the last frame of the first one. See #809.
+TEST(App, LoopTwice) {
+#if defined(__unix__)
+  auto screen = App::FixedSize(2, 2);
+  auto component = Renderer([] { return text("AB"); });
+  std::string output;
+  {
+    auto capture = StdCapture(&output);
+    {
+      Loop loop(&screen, component);
+      loop.RunOnce();
+    }
+    std::cout << "<SECOND>" << std::flush;
+    {
+      Loop loop(&screen, component);
+      loop.RunOnce();
+    }
+  }
+  const std::string second = output.substr(output.find("<SECOND>"));
+  EXPECT_NE(second.find("AB"), std::string::npos);
+  // The cursor doesn't move up, over the first frame.
+  EXPECT_EQ(second.find("\x1B[1A"), std::string::npos);
+#endif
+}
+
+// An app suspended before drawing anything has nothing to clear. See #809.
+TEST(App, NestedBeforeFirstFrame) {
+#if defined(__unix__)
+  auto outer = App::FixedSize(2, 2);
+  auto inner = App::FixedSize(2, 2);
+  auto component = Renderer([] { return text("AB"); });
+  std::string output;
+  {
+    auto capture = StdCapture(&output);
+    Loop outer_loop(&outer, component);
+    {
+      Loop inner_loop(&inner, component);
+      inner_loop.RunOnce();
+    }
+    outer_loop.RunOnce();
+  }
+  // Nothing is cleared above the inner frame.
+  const size_t inner_frame = output.find("AB");
+  ASSERT_NE(inner_frame, std::string::npos);
+  EXPECT_EQ(output.substr(0, inner_frame).find("\x1B[1A"), std::string::npos);
+  // The outer frame is drawn after the inner one, with its size.
+  EXPECT_NE(output.find("AB", inner_frame + 1), std::string::npos);
+#endif
+}
+
+// A nested app exiting before drawing anything has nothing to clear.
+TEST(App, NestedExitBeforeFirstFrame) {
+#if defined(__unix__)
+  auto outer = App::FixedSize(2, 2);
+  auto inner = App::FixedSize(2, 2);
+  auto component = Renderer([] { return text("AB"); });
+  std::string output;
+  {
+    auto capture = StdCapture(&output);
+    Loop outer_loop(&outer, component);
+    outer_loop.RunOnce();
+    {
+      Loop inner_loop(&inner, component);
+    }
+    outer_loop.RunOnce();
+  }
+  // Only the outer frame is cleared, moving up one line.
+  size_t move_up = 0;
+  for (size_t i = output.find("\x1B[1A"); i != std::string::npos;
+       i = output.find("\x1B[1A", i + 1)) {
+    move_up++;
+  }
+  EXPECT_EQ(move_up, 1u);
+#endif
+}
+
+// Every frame is wrapped in a synchronized update, so that the terminal
+// presents it atomically.
+TEST(App, SynchronizedOutput) {
+#if defined(__unix__)
+  int counter = 0;
+  auto screen = App::FixedSize(12, 3);
+  auto frames = DrawFrames(screen, Lines(&counter),
+                           {
+                               [] {},
+                               [&] { counter = 1; },
+                               [&] { screen.PrintAbove(text("Above")); },
+                           });
+  ASSERT_EQ(frames.size(), 3u);
+  const std::string begin = "\x1B[?2026h";
+  const std::string end = "\x1B[?2026l";
+  const std::string contents[] = {"Header", "1", "Above"};
+  for (size_t i = 0; i < frames.size(); ++i) {
+    const auto& frame = frames[i];
+    const size_t begin_pos = frame.find(begin);
+    const size_t end_pos = frame.find(end);
+    const size_t content_pos = frame.find(contents[i]);
+    ASSERT_NE(begin_pos, std::string::npos) << "frame " << i;
+    ASSERT_NE(end_pos, std::string::npos) << "frame " << i;
+    ASSERT_NE(content_pos, std::string::npos) << "frame " << i;
+    EXPECT_LT(begin_pos, content_pos) << "frame " << i;
+    EXPECT_LT(content_pos, end_pos) << "frame " << i;
+    EXPECT_EQ(frame.find(begin, begin_pos + 1), std::string::npos);
+    EXPECT_EQ(frame.find(end, end_pos + 1), std::string::npos);
+  }
 #endif
 }
 

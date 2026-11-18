@@ -94,6 +94,23 @@ void ftxui_on_resize(int columns, int rows) {
 #endif
 
 struct App::Internal {
+  // The frame currently displayed by the terminal. Its cells are swapped with
+  // the App's ones, instead of being copied.
+  class PreviousFrame : public Screen {
+   public:
+    PreviousFrame() : Screen(0, 0) {}
+
+    void Swap(std::vector<Cell>& cells,
+              std::vector<std::string>& hyperlinks,
+              int dimx,
+              int dimy) {
+      std::swap(cells_, cells);
+      std::swap(hyperlinks_, hyperlinks);
+      dimx_ = dimx;
+      dimy_ = dimy;
+    }
+  };
+
   App* public_;
 
   App* suspended_screen_ = nullptr;
@@ -118,6 +135,10 @@ struct App::Internal {
   bool previous_frame_resized_ = false;
 
   bool frame_valid_ = false;
+
+  // The frame currently displayed by the terminal. Only the cells that changed
+  // since are printed. Empty when the terminal must be fully redrawn.
+  PreviousFrame previous_frame_;
 
   // Elements to print above the app on the next frame.
   std::vector<Element> print_above_;
@@ -326,6 +347,7 @@ enum class DECMode : std::uint16_t {
   kMouseUrxvtMode = 1015,
   kMouseSgrPixelsMode = 1016,
   kAlternateScreen = 1049,
+  kSynchronizedOutput = 2026,
 };
 
 // Device Status Report (DSR) {
@@ -580,6 +602,7 @@ void App::Internal::ExitNow() {
 
 void App::Internal::Install() {
   frame_valid_ = false;
+  previous_frame_ = PreviousFrame();
 
   // Flush the buffer for stdout to ensure whatever the user has printed before
   // is fully applied before we start modifying the terminal configuration. This
@@ -761,17 +784,24 @@ void App::Internal::PreMain() {
   if (g_active_screen) {
     std::swap(suspended_screen_, g_active_screen);
     // Reset cursor position to the top of the screen and clear the screen.
-    suspended_screen_->internal_->TerminalSend(
-        suspended_screen_->internal_->ResetCursorPosition());
-    suspended_screen_->ResetPosition(
-        suspended_screen_->internal_->output_buffer,
-        /*clear=*/true);
-    suspended_screen_->dimx_ = 0;
-    suspended_screen_->dimy_ = 0;
+    // Nothing to clear when nothing was drawn yet.
+    if (suspended_screen_->internal_->frame_count_ != 0) {
+      suspended_screen_->internal_->TerminalSend(
+          suspended_screen_->internal_->ResetCursorPosition());
+      suspended_screen_->ResetPosition(
+          suspended_screen_->internal_->output_buffer,
+          /*clear=*/true);
+      suspended_screen_->dimx_ = 0;
+      suspended_screen_->dimy_ = 0;
+    }
 
     // Reset dimensions to force drawing the screen again next time:
     suspended_screen_->internal_->Uninstall();
   }
+
+  // The first frame is drawn at the cursor position, below what was printed
+  // before, including the last frame of a previous Loop. See #809.
+  frame_count_ = 0;
 
   // This screen is now active:
   g_active_screen = public_;
@@ -789,9 +819,11 @@ void App::Internal::PostMain() {
   // Restore suspended screen.
   if (suspended_screen_) {
     // Clear screen, and put the cursor at the beginning of the drawing.
-    public_->ResetPosition(output_buffer, /*clear=*/true);
-    public_->dimx_ = 0;
-    public_->dimy_ = 0;
+    if (frame_count_ != 0) {
+      public_->ResetPosition(output_buffer, /*clear=*/true);
+      public_->dimx_ = 0;
+      public_->dimy_ = 0;
+    }
     Uninstall();
     std::swap(g_active_screen, suspended_screen_);
     g_active_screen->internal_->Install();
@@ -1037,11 +1069,17 @@ void App::Internal::Draw(Component component) {
       break;
   }
 
+  // Ask the terminal to present the frame atomically, instead of showing it
+  // while it is being drawn. Terminals not supporting it ignore this.
+  TerminalSend(Set({DECMode::kSynchronizedOutput}));
+
   // Hide cursor to prevent flickering during reset.
   TerminalSend("\033[?25l");
 
   const bool resized =
       frame_count_ == 0 || (dimx != public_->dimx_) || (dimy != public_->dimy_);
+  // Whether the frame can be updated in place, from the previous one.
+  const bool update_in_place = !resized && print_above_.empty();
   TerminalSend(ResetCursorPosition());
 
   if (frame_count_ != 0) {
@@ -1124,10 +1162,19 @@ void App::Internal::Draw(Component component) {
     }
   }
 
-  public_->ToString(output_buffer);
+  if (update_in_place) {
+    public_->ToString(output_buffer, previous_frame_);
+  } else {
+    public_->ToString(output_buffer);
+  }
   TerminalSend(set_cursor_position_);
+  TerminalSend(Reset({DECMode::kSynchronizedOutput}));
   TerminalFlush();
 
+  previous_frame_.Swap(public_->cells_, public_->hyperlinks_, public_->dimx_,
+                       public_->dimy_);
+  public_->cells_.resize(static_cast<size_t>(public_->dimx_) *
+                         static_cast<size_t>(public_->dimy_));
   public_->Clear();
   frame_valid_ = true;
   frame_count_++;
